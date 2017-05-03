@@ -21,6 +21,8 @@ Poll_Speed = 0.5  # Seconds (float)
 MQTT_IP = "10.0.0.130"
 MQTT_Port = 1883
 MQTT_KeepAlive = 60  # Seconds
+MQTT_Username = ""
+MQTT_Password = ""
 
 # Options are Arm, Disarm, Stay, Sleep (case sensitive!)
 Topic_Publish_Events = "Paradox/Events"
@@ -46,6 +48,8 @@ Output_PControl_Number = 0
 Output_PControl_NewState = ""
 State_Machine = 0
 Polling_Enabled = 1
+Polling_Auto_Stop = True
+Polling_Restart_Delay = 30
 Debug_Mode = 0
 
 
@@ -83,6 +87,8 @@ def on_message(client, userdata, msg):
     global Output_PControl_NewState
     global Output_PControl_Action
     global Polling_Enabled
+    global Polling_Auto_Stop
+    global Polling_Restart_Delay
 
     valid_states = ['Arm', 'Disarm', 'Sleep', 'Stay']
 
@@ -90,6 +96,9 @@ def on_message(client, userdata, msg):
 
     topic = msg.topic
 
+    if Topic_Publish_Events in msg.topic:
+        if "Software log off" in msg.payload:            
+            client.publish(Topic_Subscribe_Control + "Polling/Disable", "Internal", qos=0, retain=False)            
 
     if Topic_Subscribe_Control in msg.topic:
         if "Polling" in msg.topic:
@@ -98,8 +107,12 @@ def on_message(client, userdata, msg):
                 client.publish(Topic_Publish_AppState, "Polling: Enabling...", 0, True)
                 Polling_Enabled = 1
             if "Disable" in msg.topic:
-                print "Disable polling message received..."
-                Polling_Enabled = 0
+                print "Disable polling message received..."                
+                Polling_Enabled = 0                
+                if Polling_Auto_Stop == "True" and msg.payload == "Internal":
+                    time.sleep(Polling_Restart_Delay)
+                    client.publish(Topic_Subscribe_Control + "Polling/Enable", "", qos=0, retain=False)            
+                
 
         elif "/FO/" in msg.topic:
             try:
@@ -729,6 +742,8 @@ if __name__ == '__main__':
                 IP150_Port = int(Config.get("IP150", "IP_Software_Port"))
                 MQTT_IP = Config.get("MQTT Broker", "IP")
                 MQTT_Port = int(Config.get("MQTT Broker", "Port"))
+                MQTT_Username = Config.get("MQTT Broker", "Username")
+                MQTT_Password = Config.get("MQTT Broker", "Password")
 
                 Topic_Publish_Events = Config.get("MQTT Topics", "Topic_Publish_Events")
                 Events_Payload_Numeric = int(Config.get("MQTT Topics", "Events_Payload_Numeric"))
@@ -736,6 +751,9 @@ if __name__ == '__main__':
                 Startup_Publish_All_Info = Config.get("MQTT Topics", "Startup_Publish_All_Info")
                 Topic_Publish_Labels = Config.get("MQTT Topics", "Topic_Publish_Labels")
                 Topic_Publish_AppState = Config.get("MQTT Topics", "Topic_Publish_AppState")
+                
+                Polling_Auto_Stop = Config.get("Application", "Polling_Auto_Stop")
+                Polling_Restart_Delay = int(Config.get("Application", "Polling_Restart_Delay"))
                 Startup_Update_All_Labels = Config.get("Application", "Startup_Update_All_Labels")
                 Debug_Mode = int(Config.get("Application", "Debug_Mode"))
 
@@ -755,12 +773,18 @@ if __name__ == '__main__':
                 client = mqtt.Client()
                 client.on_connect = on_connect
                 client.on_message = on_message
-
+                
+                if len(MQTT_Username) > 0 and len(MQTT_Password) > 0:
+                    client.username_pw_set(MQTT_Username, MQTT_Password)
+                
                 client.connect(MQTT_IP, MQTT_Port, MQTT_KeepAlive)
 
                 client.loop_start()
 
                 client.subscribe(Topic_Subscribe_Control + "#")
+                
+                if Polling_Auto_Stop == "True":
+                    client.subscribe(Topic_Publish_Events)
 
                 print "MQTT client subscribed to control messages on topic: " + Topic_Subscribe_Control + "#"
 
@@ -925,5 +949,5 @@ if __name__ == '__main__':
             State_Machine = 2
 
         elif State_Machine == 10:
-
             time.sleep(3)
+            
